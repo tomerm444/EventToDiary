@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#3b6fd8">
-<title>ליומן</title>
+<title>רשמתי</title>
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icon-192.png">
 <style>
@@ -53,7 +53,7 @@
 </head>
 <body>
 <header>
-  <h1>📅 ליומן</h1>
+  <h1>📅 רשמתי</h1>
   <button id="settingsBtn" aria-label="הגדרות">⚙️</button>
 </header>
 <main>
@@ -72,7 +72,7 @@
 
   <section id="input" class="card">
     <p class="muted" style="margin-top:0">
-      משתפים לכאן הודעה, צילום של דף/הזמנה או צילום מסך ← בוחרים "ליומן". או מדביקים טקסט / בוחרים תמונה:
+      משתפים לכאן הודעה, צילום של דף/הזמנה או צילום מסך ← בוחרים "רשמתי". או מדביקים טקסט / בוחרים תמונה:
     </p>
     <textarea id="text" placeholder="הדביקו כאן הודעה..."></textarea>
     <div class="thumbs" id="pickedThumbs"></div>
@@ -199,6 +199,9 @@ function buildPrompt(now) {
 - location: כתובת או מקום, אם צוינו.
 - notes: פרטים חשובים בקצרה — מה להביא, עלות, איש קשר/טלפון, קוד לבוש, דדליין לאישור הגעה.
 דדליין (כמו "לשלם עד יום חמישי" או "לאשר הגעה עד 5.12") הוא אירוע נפרד של יום שלם עם כותרת שמתחילה ב"להספיק:".
+חשוב מאוד: כשיש תמונה (הזמנה, מודעה, מכתב, צילום מסך) — קרא את כל הטקסט שבה בעיון, כולל אותיות קטנות, אייקונים של שעון/לוח שנה/מיקום וטקסט בצדדים.
+הפרטים החשובים (שעה, מקום, כתובת, מה להביא) מופיעים לרוב בתמונה ולא בהודעה שנשלחה איתה.
+אם אותו אירוע מוזכר גם בהודעה וגם בתמונה — זה אירוע אחד: שלב את כל הפרטים משניהם, ואל תשאיר שדה ריק אם המידע מופיע באחד מהם.
 אל תמציא אירועים. אם אין אירועים, החזר רשימה ריקה והסבר קצר ב-no_events_reason.`;
 }
 async function callGemini(model, key, parts, { schema = true, thinking = true } = {}) {
@@ -264,8 +267,10 @@ async function extract(input, autoTries = 0) {
   const diag = [];
   try {
     const parts = [{ text: buildPrompt(new Date()) }];
-    if (input.text.trim()) parts.push({ text: 'התוכן:\n' + input.text.trim() });
-    for (const img of input.images) parts.push(await imagePart(img));
+    const imgKB = [];
+    for (const img of input.images) { const ip = await imagePart(img); imgKB.push(Math.round(ip.inline_data.data.length * 0.75 / 1024)); parts.push(ip); }
+    if (input.images.length) parts.push({ text: `למעלה ${input.images.length > 1 ? input.images.length + ' תמונות' : 'תמונה'} — קרא את כל הפרטים שבה.` });
+    if (input.text.trim()) parts.push({ text: (input.images.length ? 'ההודעה שנשלחה עם התמונה:\n' : 'התוכן:\n') + input.text.trim() });
     let data, used, quota = [];
     for (const model of await candidateModels(key)) {
       const ts = Date.now();
@@ -308,7 +313,7 @@ async function extract(input, autoTries = 0) {
       source: input.text.trim().slice(0, 400) || (input.images.length ? `📷 ${input.images.length} תמונות` : ''),
       events: data.events.map(normalizeEvent),
       reason: data.no_events_reason || '',
-      info: `${used} · ${secs}s`
+      info: `${used} · ${secs}s` + (imgKB.length ? ` · 📷 ${imgKB.map(k => k + 'KB').join(', ')}` : '')
     };
     if (rec.events.length) { const h = loadHistory(); h.unshift(rec); saveHistory(h); }
     showResult(rec, input.images);
