@@ -1,6 +1,6 @@
 // Service worker for "ליומן": receives shared text / images and hands them to the page.
 // Cache names are prefixed with "yoman-" so they never clash with other apps on the same github.io site.
-const VERSION = 'v3';
+const VERSION = 'v4';
 const SHELL_CACHE = 'yoman-shell-' + VERSION;
 const SHARE_CACHE = 'yoman-shared';
 const SHELL = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png'];
@@ -37,6 +37,11 @@ self.addEventListener('fetch', e => {
     return;
   }
 
+  // The manifest (app name/icon) always comes from the network, so renames and new icons show up at install time.
+  if (e.request.method === 'GET' && url.pathname.endsWith('/manifest.json')) {
+    e.respondWith(fetch(e.request, { cache: 'no-store' }).catch(() => caches.match(e.request, { ignoreSearch: true })));
+    return;
+  }
   // App files: answer instantly from the phone's cache and refresh it in the background.
   if (e.request.method === 'GET' && url.origin === location.origin) {
     e.respondWith((async () => {
