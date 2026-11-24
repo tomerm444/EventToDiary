@@ -1,6 +1,6 @@
 // Service worker for "ליומן": receives shared text / images and hands them to the page.
 // Cache names are prefixed with "yoman-" so they never clash with other apps on the same github.io site.
-const VERSION = 'v4';
+const VERSION = 'v5';
 const SHELL_CACHE = 'yoman-shell-' + VERSION;
 const SHARE_CACHE = 'yoman-shared';
 const SHELL = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png'];
