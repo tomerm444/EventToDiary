@@ -49,11 +49,13 @@
   .hist .t { font-weight:600; }
   .icon { background:none; border:0; font-size:18px; padding:4px 8px; }
   .info { direction:ltr; font-size:11px; color:var(--muted); margin-top:4px; text-align:left; }
+  .usage { font-size:12px; opacity:.85; margin-inline-start:auto; margin-inline-end:6px; }
 </style>
 </head>
 <body>
 <header>
   <h1>📅 רשמתי</h1>
+  <span id="usage" class="usage"></span>
   <button id="settingsBtn" aria-label="הגדרות">⚙️</button>
 </header>
 <main>
@@ -64,6 +66,8 @@
     <p class="muted" id="keyHint">אפשר להשתמש באותו מפתח של "תמלול". מקבלים מפתח בחינם ב-<a href="https://aistudio.google.com/apikey" target="_blank">aistudio.google.com/apikey</a>.</p>
     <label for="model">מודל</label>
     <select id="model"><option value="auto">אוטומטי (מומלץ)</option></select>
+    <label>שימוש במכסה</label>
+    <div class="muted" id="usageDetails" style="font-size:13px"></div>
     <div class="row" style="margin-top:12px">
       <button class="btn" id="saveBtn">שמירה</button>
       <button class="btn light" id="closeBtn">סגירה</button>
@@ -93,6 +97,42 @@
 </main>
 
 <script>
+// ---------- daily request counter (shared by "תמלול" and "רשמתי": same site → same Google quota) ----------
+// Google resets the daily quota at midnight Pacific time (10:00 in Israel) and doesn't report what's left,
+// so we count the requests ourselves; when a daily-quota error arrives we remember after how many it happened.
+const pacificDay = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles' }).format(new Date());
+function usage() {
+  let u; try { u = JSON.parse(localStorage.getItem('gemini-usage')); } catch {}
+  return u && u.day === pacificDay() ? u : { day: pacificDay(), count: 0, models: {} };
+}
+function knownLimits() { try { return JSON.parse(localStorage.getItem('gemini-limits')) || {}; } catch { return {}; } }
+function countRequest(model) {
+  const u = usage(); u.count++; u.models[model] = (u.models[model] || 0) + 1;
+  try { localStorage.setItem('gemini-usage', JSON.stringify(u)); } catch {}
+  renderUsage();
+}
+function noteDailyLimit(model) {
+  const n = usage().models[model]; if (!n) return;
+  const l = knownLimits(); l[model] = { n, day: pacificDay() };
+  try { localStorage.setItem('gemini-limits', JSON.stringify(l)); } catch {}
+  renderUsage();
+}
+function renderUsage() {
+  const u = usage(), b = document.getElementById('usage'), d = document.getElementById('usageDetails');
+  if (b) { b.textContent = u.count ? `היום: ${u.count} בקשות` : ''; b.title = 'נספר בשתי האפליקציות; מתאפס ב-10:00'; }
+  if (!d) return;
+  const lim = knownLimits(), names = [...new Set([...Object.keys(u.models), ...Object.keys(lim)])];
+  d.innerHTML = '';
+  if (!names.length) { d.textContent = 'עוד לא נשלחו בקשות היום.'; return; }
+  const top = document.createElement('div'); top.textContent = `סה"כ היום (בשתי האפליקציות): ${u.count}. מתאפס כל יום ב-10:00.`; d.append(top);
+  for (const m of names) {
+    const row = document.createElement('div'); row.style.direction = 'ltr'; row.style.textAlign = 'left';
+    row.textContent = `${m}: ${u.models[m] || 0}` + (lim[m] ? ` / ~${lim[m].n} (daily limit measured ${lim[m].day})` : '');
+    d.append(row);
+  }
+}
+window.addEventListener('storage', e => { if (e.key === 'gemini-usage' || e.key === 'gemini-limits') renderUsage(); });
+
 // ===================== basics =====================
 const $ = id => document.getElementById(id);
 const P = 'yoman:';     // localStorage prefix: this app shares its origin with other apps on the same github.io site
@@ -110,7 +150,9 @@ function hideStatus() { $('status').classList.add('hidden'); }
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
 
 // ===================== settings =====================
+renderUsage();
 function openSettings() {
+  renderUsage();
   $('key').value = store.get('apiKey', '') || getKey();
   $('settings').classList.remove('hidden');
   fillModelSelect();
@@ -214,6 +256,7 @@ async function callGemini(model, key, parts, { schema = true, thinking = true, h
   const timer = setTimeout(() => { timedOut = true; ctrl.abort(); }, TIMEOUT_MS);
   const onAbort = () => ctrl.abort(); signal?.addEventListener('abort', onAbort);
   try {
+    countRequest(model);
     const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
       method: 'POST', signal: ctrl.signal,
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
@@ -288,6 +331,7 @@ async function extract(input, autoTries = 0) {
         if (!e.cancelled) {
           diag.push(`${model} (${Math.round((Date.now() - ts) / 1000)}s): ${e.status || ''} ${String(e.message).slice(0, 110)}`);
           if (/no longer available|not found|not supported|deprecated/i.test(e.message) && (e.status === 404 || e.status === 400)) markBad(model);
+          if (e.status === 429 && e.daily) noteDailyLimit(model);
           if (e.status === 429) { quota.push(e); coolDown(model, e.daily ? 360 : Math.max(1, (e.retryAfter || 60) / 60)); }
           else if (e.timeout) coolDown(model, 5);
         }
